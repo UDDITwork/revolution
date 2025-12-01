@@ -1,0 +1,17 @@
+pymupdf==1.24.10
+streamlit==1.38.0
+python-pptx==1.0.2
+Pillow==10.4.0
+requests==2.32.3
+frontend==0.0.3
+llama-index-core
+llama-index-readers-file
+llama-index-embeddings-nvidia
+llama-index-llms-anthropic
+llama-index-vector-stores-pinecone
+python-docx
+anthropic
+memorisdk
+pinecone-client
+pandas
+libsql-experimental
