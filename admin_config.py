@@ -445,10 +445,10 @@ Provide a structured analysis for patent documentation."""
         result = cursor.fetchone()
 
         if result:
-            # Update last login
+            # Update last login (use isoformat for Turso compatibility)
             cursor.execute(
                 "UPDATE admin_users SET last_login = ? WHERE id = ?",
-                (datetime.now(), result[0])
+                (datetime.now().isoformat(), result[0])
             )
             conn.commit()
 
@@ -502,7 +502,7 @@ Provide a structured analysis for patent documentation."""
             """UPDATE system_prompts
                SET prompt_text = ?, updated_at = ?, updated_by = ?
                WHERE section_key = ?""",
-            (prompt_text, datetime.now(), updated_by, section_key)
+            (prompt_text, datetime.now().isoformat(), updated_by, section_key)
         )
 
         conn.commit()
