@@ -15,6 +15,7 @@ vectorstore/
 
 # Environment variables
 .env
+run_local.bat
 
 # IDE
 .vscode/
