@@ -80,16 +80,6 @@ def show_login_page():
         st.markdown("---")
         st.markdown("*Only authorized administrators can access this page.*")
 
-        # Default credentials hint
-        with st.expander("🔑 First time login?"):
-            st.info("""
-            Default admin credentials:
-            - Email: `bikash@gmail.com`
-            - Password: `jpmcA@123`
-
-            Please change these after first login!
-            """)
-
 
 def show_admin_dashboard():
     """Display admin dashboard with prompt management"""
