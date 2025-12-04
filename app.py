@@ -170,54 +170,53 @@ def initialize_pinecone():
 @st.cache_resource
 def initialize_memori():
     """
-    Initialize Memori with Anthropic for patent document generation sessions.
+    Initialize Memori for patent document generation sessions.
+
+    Architecture:
+    - Memori uses OpenAI for internal memory agents (conscious_ingest, auto_ingest)
+    - Your app uses Anthropic (Claude) for patent document generation
+    - LiteLLM bridges both - records all conversations automatically
 
     Environment Detection:
     - Production (Render): Uses PostgreSQL via MEMORI_DATABASE_URL
     - Local Development: Uses SQLite (memori_patent.db)
-
-    Memori acts as:
-    - Session memory: Remembers entire patent document generation process
-    - Conscious layer: Aware of all saved backgrounds, claims, and document context
-    - Persistent memory: Maintains context across multiple queries and generations
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
     # Detect environment: PostgreSQL for production, SQLite for local
     database_url = os.environ.get("MEMORI_DATABASE_URL", "")
 
     if database_url:
         # Production: Use PostgreSQL from Render
-        print(f"Memori: Using PostgreSQL database (production)")
+        print("Memori: Using PostgreSQL database (production)")
     else:
         # Local development: Use SQLite
         database_url = "sqlite:///memori_patent.db"
-        print(f"Memori: Using SQLite database (local development)")
+        print("Memori: Using SQLite database (local development)")
 
     try:
-        # Create SQLAlchemy engine and session factory
-        engine = create_engine(database_url)
-        Session = sessionmaker(bind=engine)
+        # Get OpenAI API key for Memori's internal agents
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        if not openai_api_key:
+            print("WARNING: OPENAI_API_KEY not found - Memori features will be limited")
 
-        # Create Anthropic client for Memori
-        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found")
+        # Initialize Memori with full features
+        # - database_connect: PostgreSQL (prod) or SQLite (local)
+        # - conscious_ingest: AI-powered memory analysis at startup
+        # - auto_ingest: Automatic context injection on every LLM call
+        # - openai_api_key: For Memori's internal memory processing agents
+        memori = Memori(
+            database_connect=database_url,
+            namespace="patent_generation_session",
+            conscious_ingest=True,   # Enable background memory analysis
+            auto_ingest=True,        # Enable automatic context injection
+            openai_api_key=openai_api_key,
+            verbose=False
+        )
+        memori.enable()
 
-        anthropic_client = AnthropicClient(api_key=anthropic_api_key)
-
-        # Initialize Memori with Anthropic integration
-        mem = Memori(conn=Session).anthropic.register(anthropic_client)
-
-        # Set attribution for memory tracking
-        mem.attribution(entity_id="patent-user", process_id="patent-generator")
-
-        # Build database tables on first run
-        mem.config.storage.build()
-
-        print("Memori: Successfully initialized with Anthropic")
-        return mem
+        print("Memori: Successfully initialized with full features")
+        print("  - conscious_ingest: ON (AI memory analysis)")
+        print("  - auto_ingest: ON (automatic context injection)")
+        return memori
 
     except Exception as e:
         print(f"WARNING: Memori initialization failed: {e}")
