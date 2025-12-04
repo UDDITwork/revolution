@@ -170,36 +170,59 @@ def initialize_pinecone():
 @st.cache_resource
 def initialize_memori():
     """
-    Initialize Memori as a conscious layer for patent document generation sessions.
+    Initialize Memori with Anthropic for patent document generation sessions.
+
+    Environment Detection:
+    - Production (Render): Uses PostgreSQL via MEMORI_DATABASE_URL
+    - Local Development: Uses SQLite (memori_patent.db)
 
     Memori acts as:
     - Session memory: Remembers entire patent document generation process
     - Conscious layer: Aware of all saved backgrounds, claims, and document context
     - Persistent memory: Maintains context across multiple queries and generations
     """
-    # Check if Turso is configured for cloud deployment
-    turso_url = os.environ.get("TURSO_DATABASE_URL", "")
-    turso_token = os.environ.get("TURSO_AUTH_TOKEN", "")
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
-    if turso_url and turso_token:
-        # Use Turso for cloud deployment (Render)
-        # Memori supports libsql:// URLs for Turso
-        database_url = f"libsql://{turso_url.replace('libsql://', '')}?authToken={turso_token}"
+    # Detect environment: PostgreSQL for production, SQLite for local
+    database_url = os.environ.get("MEMORI_DATABASE_URL", "")
+
+    if database_url:
+        # Production: Use PostgreSQL from Render
+        print(f"Memori: Using PostgreSQL database (production)")
     else:
-        # Use local SQLite for development
-        database_url = "sqlite:///multimodal_rag_memory.db"
+        # Local development: Use SQLite
+        database_url = "sqlite:///memori_patent.db"
+        print(f"Memori: Using SQLite database (local development)")
 
-    # Memori automatically works with Anthropic - no special config needed
-    # It intercepts LLM calls transparently
-    memori = Memori(
-        database_connect=database_url,
-        namespace="patent_generation_session",  # Dedicated namespace for patent sessions
-        conscious_ingest=True,  # Background analysis and memory promotion
-        auto_ingest=True,       # Dynamic context retrieval per query
-        verbose=False           # Set to True to see agent activity
-    )
-    memori.enable()
-    return memori
+    try:
+        # Create SQLAlchemy engine and session factory
+        engine = create_engine(database_url)
+        Session = sessionmaker(bind=engine)
+
+        # Create Anthropic client for Memori
+        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not anthropic_api_key:
+            raise ValueError("ANTHROPIC_API_KEY not found")
+
+        anthropic_client = AnthropicClient(api_key=anthropic_api_key)
+
+        # Initialize Memori with Anthropic integration
+        mem = Memori(conn=Session).anthropic.register(anthropic_client)
+
+        # Set attribution for memory tracking
+        mem.attribution(entity_id="patent-user", process_id="patent-generator")
+
+        # Build database tables on first run
+        mem.config.storage.build()
+
+        print("Memori: Successfully initialized with Anthropic")
+        return mem
+
+    except Exception as e:
+        print(f"WARNING: Memori initialization failed: {e}")
+        print("Continuing without Memori session memory...")
+        return None
 
 def inject_background_context_to_memori(memori, background_db):
     """

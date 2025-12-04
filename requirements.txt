@@ -15,3 +15,5 @@ memorisdk
 pinecone-client
 pandas
 libsql-experimental
+sqlalchemy
+psycopg2-binary
