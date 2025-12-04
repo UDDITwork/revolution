@@ -5,6 +5,7 @@ Admin Dashboard Page for Streamlit Multi-Page App
 import streamlit as st
 import sys
 import os
+import hashlib
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,9 +23,32 @@ st.set_page_config(
 if 'admin_db' not in st.session_state:
     st.session_state['admin_db'] = AdminConfigDB()
 
+# Session token for login persistence across refreshes
+# Uses a simple hash of email + secret to create a session token
+SESSION_SECRET = "patent_admin_2024"
+
+def generate_session_token(email):
+    """Generate a session token for the admin user"""
+    return hashlib.sha256(f"{email}{SESSION_SECRET}".encode()).hexdigest()[:16]
+
+def verify_session_token(email, token):
+    """Verify if the session token is valid"""
+    return generate_session_token(email) == token
+
+# Check for existing session from query params (survives refresh)
+query_params = st.query_params
+saved_email = query_params.get("admin_email", None)
+saved_token = query_params.get("session", None)
+
 # Initialize session state for admin login
 if 'admin_logged_in' not in st.session_state:
-    st.session_state['admin_logged_in'] = False
+    # Try to restore session from query params
+    if saved_email and saved_token and verify_session_token(saved_email, saved_token):
+        st.session_state['admin_logged_in'] = True
+        st.session_state['admin_email'] = saved_email
+    else:
+        st.session_state['admin_logged_in'] = False
+
 if 'admin_email' not in st.session_state:
     st.session_state['admin_email'] = None
 
@@ -72,6 +96,10 @@ def show_login_page():
                     if st.session_state['admin_db'].verify_admin(email, password):
                         st.session_state['admin_logged_in'] = True
                         st.session_state['admin_email'] = email
+                        # Set query params for session persistence across refreshes
+                        token = generate_session_token(email)
+                        st.query_params["admin_email"] = email
+                        st.query_params["session"] = token
                         st.success("✅ Login successful!")
                         st.rerun()
                     else:
@@ -93,6 +121,8 @@ def show_admin_dashboard():
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state['admin_logged_in'] = False
             st.session_state['admin_email'] = None
+            # Clear session query params
+            st.query_params.clear()
             st.rerun()
 
         st.markdown("---")
