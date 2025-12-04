@@ -23,6 +23,13 @@ from llama_index.embeddings.nvidia import NVIDIAEmbedding
 from llama_index.llms.anthropic import Anthropic
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from document_processors import load_multimodal_data, load_data_from_directory
+from enhanced_retrieval import (
+    initialize_enhanced_settings,
+    create_enhanced_retriever,
+    EnhancedRetrieverConfig,
+    apply_reranking,
+    HybridRetriever
+)
 from memori import Memori
 from anthropic import Anthropic as AnthropicClient
 from pinecone import Pinecone, ServerlessSpec
@@ -79,6 +86,8 @@ if 'tabs_unlocked' not in st.session_state:
     }
 if 'current_section_output' not in st.session_state:
     st.session_state['current_section_output'] = {}  # Stores outputs for each section
+if 'document_nodes' not in st.session_state:
+    st.session_state['document_nodes'] = []  # Store nodes for hybrid search BM25
 if 'fig2_image_uploaded' not in st.session_state:
     st.session_state['fig2_image_uploaded'] = False
 if 'fig2_vision_data' not in st.session_state:
@@ -265,12 +274,19 @@ def initialize_settings():
         truncate="END"
     )
     Settings.llm = initialize_llm()
-    # Use TokenTextSplitter instead of SentenceSplitter to avoid NLTK/sqlite3 dependency
-    from llama_index.core.node_parser import TokenTextSplitter
-    Settings.text_splitter = TokenTextSplitter(chunk_size=600, chunk_overlap=50)
+
+    # ENHANCED: Use sentence-aware chunking for better semantic coherence
+    # This preserves sentence boundaries and improves retrieval accuracy
+    from llama_index.core.node_parser import SentenceSplitter
+    Settings.text_splitter = SentenceSplitter(
+        chunk_size=1024,      # Characters (larger chunks for better context)
+        chunk_overlap=100,    # Overlap for continuity
+        paragraph_separator="\n\n"
+    )
+    print("Settings: Using sentence-aware chunking (1024 chars, 100 overlap)")
 
 # Create index from documents (using Pinecone vector store with namespaces)
-def create_index(documents, pinecone_index, namespace="general-docs"):
+def create_index(documents, pinecone_index, namespace="general-docs", store_nodes=True):
     """
     Create vector index using Pinecone with namespace support.
 
@@ -280,6 +296,7 @@ def create_index(documents, pinecone_index, namespace="general-docs"):
         namespace: Namespace to separate different types of content
                   "general-docs" - PPTX, general DOCX, invention details
                   "patent-claims" - Patent claims only
+        store_nodes: Whether to store nodes in session state for hybrid search
     """
     try:
         # Create Pinecone vector store with namespace
@@ -296,6 +313,24 @@ def create_index(documents, pinecone_index, namespace="general-docs"):
             documents,
             storage_context=storage_context
         )
+
+        # ENHANCED: Store document nodes for hybrid search (BM25)
+        if store_nodes and namespace == "general-docs":
+            try:
+                # Extract nodes from the index for BM25 indexing
+                from llama_index.core.schema import TextNode
+                nodes = []
+                for doc in documents:
+                    # Create TextNode from document
+                    node = TextNode(
+                        text=doc.text,
+                        metadata=doc.metadata if hasattr(doc, 'metadata') else {}
+                    )
+                    nodes.append(node)
+                st.session_state['document_nodes'] = nodes
+                print(f"Stored {len(nodes)} nodes for hybrid search")
+            except Exception as e:
+                print(f"Could not store nodes for hybrid search: {e}")
 
         print(f"Successfully indexed {len(documents)} documents in Pinecone namespace '{namespace}'")
         return index
@@ -327,18 +362,36 @@ def unlock_next_tab(current_tab_name):
         pass
     return None
 
-def get_cumulative_context(retriever, query):
+def get_cumulative_context(retriever, query, use_reranking=False):
     """
     Get cumulative context from all sources for section generation.
+
+    ENHANCED: Now supports hybrid search (vector + BM25) and optional reranking.
+
+    Args:
+        retriever: The retriever instance (can be hybrid or standard)
+        query: The search query
+        use_reranking: Whether to apply Cohere reranking (requires COHERE_API_KEY)
 
     Returns:
         dict with 'pinecone_context', 'previous_sections', 'patent_info'
     """
-    # 1. Retrieve from Pinecone (general-docs namespace)
+    # 1. Retrieve from Pinecone (general-docs namespace) with hybrid search
     retrieved_nodes = retriever.retrieve(query)
+
+    # ENHANCED: Apply reranking if enabled
+    if use_reranking and retrieved_nodes:
+        retrieved_nodes = apply_reranking(retrieved_nodes, query, top_n=5)
+
     context_parts = []
     for idx, node in enumerate(retrieved_nodes):
-        context_parts.append(f"Document {idx+1}:\n{node.text}\n")
+        # Include metadata if available for better context
+        source_info = ""
+        if hasattr(node, 'node') and hasattr(node.node, 'metadata'):
+            meta = node.node.metadata
+            if 'source' in meta:
+                source_info = f" [Source: {meta['source']}]"
+        context_parts.append(f"Document {idx+1}{source_info}:\n{node.text}\n")
     pinecone_context = "\n".join(context_parts) if context_parts else "No relevant documents found."
 
     # 2. Get all previously saved sections
@@ -818,8 +871,23 @@ def main():
 
     with col2:
         if st.session_state['index'] is not None:
-            # Get retriever for all tabs
-            retriever = st.session_state['index'].as_retriever(similarity_top_k=5)
+            # ENHANCED: Create hybrid retriever with BM25 + Vector search
+            # This improves retrieval accuracy by combining semantic + keyword matching
+            document_nodes = st.session_state.get('document_nodes', [])
+            if document_nodes:
+                # Use hybrid search (Vector + BM25)
+                base_retriever = st.session_state['index'].as_retriever(similarity_top_k=10)
+                retriever = HybridRetriever(
+                    vector_retriever=base_retriever,
+                    nodes=document_nodes,
+                    similarity_top_k=5,
+                    bm25_weight=0.3,
+                    vector_weight=0.7
+                )
+                print("Using hybrid retriever (Vector 70% + BM25 30%)")
+            else:
+                # Fallback to standard vector retriever
+                retriever = st.session_state['index'].as_retriever(similarity_top_k=5)
 
             # Create 10-tab interface
             tab_names = [

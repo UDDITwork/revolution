@@ -19,3 +19,5 @@ sqlalchemy
 psycopg2-binary
 pymongo
 llama-parse
+llama-index-postprocessor-cohere-rerank
+rank-bm25
