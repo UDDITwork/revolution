@@ -642,13 +642,13 @@ def main():
 
         st.subheader("Upload Documents")
 
-        # Input Document 1: PowerPoint (Optional)
-        st.markdown("**Input Document 1** (Optional - PPTX)")
+        # Input Document 1: Any supported document (PDF, PPTX, DOCX, Images)
+        st.markdown("**Input Document 1** (Optional - PDF, PPTX, DOCX, or Image)")
         input_doc1 = st.file_uploader(
-            "Upload PowerPoint presentation",
-            type=['pptx', 'ppt'],
+            "Upload document (PDF, PowerPoint, Word, or Image)",
+            type=['pptx', 'ppt', 'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg'],
             key="input_doc1",
-            help="Optional: PowerPoint presentation for knowledge base"
+            help="Supports: PDF (with LlamaParse for charts/tables), PowerPoint, Word documents, and images"
         )
 
         # Input Document 2: Patent Claims Word Document (Optional - Special Processing)

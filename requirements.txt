@@ -18,3 +18,4 @@ libsql-experimental
 sqlalchemy
 psycopg2-binary
 pymongo
+llama-parse

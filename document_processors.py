@@ -24,6 +24,14 @@ from utils import (
 )
 from pptx_reader import PptxReader
 from docx import Document as DocxDocument
+
+# Import LlamaParse processor (optional - falls back to PyMuPDF if unavailable)
+try:
+    from llamaparse_processor import is_llamaparse_available, parse_uploaded_file_with_llamaparse
+    LLAMAPARSE_INTEGRATION_AVAILABLE = True
+except ImportError:
+    LLAMAPARSE_INTEGRATION_AVAILABLE = False
+    print("LlamaParse integration not available - using PyMuPDF for all PDFs")
 from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
 from docx.table import Table
@@ -392,6 +400,18 @@ def load_multimodal_data(files, llm):
             documents.append(doc)
         elif file_extension == '.pdf':
             try:
+                # Try LlamaParse first for enhanced PDF parsing (charts, complex tables)
+                if LLAMAPARSE_INTEGRATION_AVAILABLE and is_llamaparse_available():
+                    print(f"Attempting LlamaParse for {file.name}...")
+                    llamaparse_docs = parse_uploaded_file_with_llamaparse(file)
+                    if llamaparse_docs:
+                        documents.extend(llamaparse_docs)
+                        print(f"LlamaParse successfully processed {file.name}: {len(llamaparse_docs)} documents")
+                        continue  # Skip PyMuPDF fallback
+                    else:
+                        print(f"LlamaParse returned no documents for {file.name}, falling back to PyMuPDF")
+
+                # Fallback to PyMuPDF (existing functionality)
                 pdf_documents = get_pdf_documents(file, llm)
                 documents.extend(pdf_documents)
             except Exception as e:
