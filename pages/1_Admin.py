@@ -159,8 +159,7 @@ def manage_prompts_page():
                             st.session_state['admin_email']
                         )
                         if success:
-                            st.success("✅ Prompt updated successfully!")
-                            st.rerun()
+                            st.success("✅ Prompt updated successfully! Refresh the page to see changes.")
                         else:
                             st.error("❌ Failed to update prompt")
                     else:
