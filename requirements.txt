@@ -17,3 +17,4 @@ pandas
 libsql-experimental
 sqlalchemy
 psycopg2-binary
+pymongo

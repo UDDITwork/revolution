@@ -1,7 +1,7 @@
 """
 Admin Configuration and Prompt Management System
 Handles admin authentication and system prompt storage/retrieval
-Supports both local SQLite and Turso cloud database.
+Supports both local SQLite, Turso cloud database, and MongoDB for prompts.
 """
 
 import sqlite3
@@ -16,10 +16,39 @@ try:
 except ImportError:
     TURSO_AVAILABLE = False
 
+# Try to import MongoDB
+try:
+    from pymongo import MongoClient
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+
+def get_mongodb_client():
+    """Get MongoDB client for system prompts storage"""
+    mongodb_url = os.environ.get("MONGODB_URL")
+    if mongodb_url and MONGODB_AVAILABLE:
+        try:
+            client = MongoClient(mongodb_url)
+            # Test connection
+            client.admin.command('ping')
+            return client
+        except Exception as e:
+            print(f"MongoDB connection failed: {e}")
+            return None
+    return None
+
 class AdminConfigDB:
     def __init__(self, db_path="admin_config.db"):
         self.db_path = db_path
         self.use_turso = TURSO_AVAILABLE and is_turso_enabled()
+        # MongoDB for system prompts (separate collection)
+        self.mongodb_client = get_mongodb_client()
+        self.use_mongodb_for_prompts = self.mongodb_client is not None
+        if self.use_mongodb_for_prompts:
+            self.prompts_collection = self.mongodb_client["patragenix_db"]["system_prompts"]
+            print("AdminConfig: Using MongoDB for system prompts storage")
+        else:
+            print("AdminConfig: Using SQLite/Turso for system prompts storage")
         self.init_database()
 
     def get_connection(self):
@@ -71,13 +100,24 @@ class AdminConfigDB:
         return hashlib.sha256(password.encode()).hexdigest()
 
     def _init_default_admin(self, cursor, conn):
-        """Initialize default admin user"""
+        """Initialize default admin users"""
+        # Admin user 1: bikash@gmail.com
         cursor.execute("SELECT COUNT(*) FROM admin_users WHERE email = ?", ("bikash@gmail.com",))
         if cursor.fetchone()[0] == 0:
             password_hash = self._hash_password("jpmcA@123")
             cursor.execute(
                 "INSERT INTO admin_users (email, password_hash) VALUES (?, ?)",
                 ("bikash@gmail.com", password_hash)
+            )
+            conn.commit()
+
+        # Admin user 2: udditkantsinha@gmail.com
+        cursor.execute("SELECT COUNT(*) FROM admin_users WHERE email = ?", ("udditkantsinha@gmail.com",))
+        if cursor.fetchone()[0] == 0:
+            password_hash = self._hash_password("jpmcA@123")
+            cursor.execute(
+                "INSERT INTO admin_users (email, password_hash) VALUES (?, ?)",
+                ("udditkantsinha@gmail.com", password_hash)
             )
             conn.commit()
 
@@ -421,6 +461,24 @@ Provide a structured analysis for patent documentation."""
             }
         }
 
+        # Initialize in MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                for section_key, config in default_prompts.items():
+                    if not self.prompts_collection.find_one({"section_key": section_key}):
+                        self.prompts_collection.insert_one({
+                            "section_key": section_key,
+                            "section_name": config["name"],
+                            "prompt_text": config["prompt"],
+                            "description": config["description"],
+                            "updated_at": datetime.now().isoformat(),
+                            "updated_by": "system"
+                        })
+                print("AdminConfig: Default prompts initialized in MongoDB")
+            except Exception as e:
+                print(f"MongoDB init prompts error: {e}")
+
+        # Also initialize in SQLite/Turso (for fallback and local dev)
         for section_key, config in default_prompts.items():
             cursor.execute("SELECT COUNT(*) FROM system_prompts WHERE section_key = ?", (section_key,))
             if cursor.fetchone()[0] == 0:
@@ -457,6 +515,15 @@ Provide a structured analysis for patent documentation."""
 
     def get_prompt(self, section_key):
         """Get system prompt for a section"""
+        # Use MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                doc = self.prompts_collection.find_one({"section_key": section_key})
+                return doc["prompt_text"] if doc else None
+            except Exception as e:
+                print(f"MongoDB get_prompt error: {e}")
+                # Fall back to SQLite
+
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -471,6 +538,25 @@ Provide a structured analysis for patent documentation."""
 
     def get_all_prompts(self):
         """Get all system prompts"""
+        # Use MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                results = list(self.prompts_collection.find().sort("section_name", 1))
+                return [
+                    {
+                        "section_key": doc.get("section_key"),
+                        "section_name": doc.get("section_name"),
+                        "prompt_text": doc.get("prompt_text"),
+                        "description": doc.get("description"),
+                        "updated_at": doc.get("updated_at"),
+                        "updated_by": doc.get("updated_by")
+                    }
+                    for doc in results
+                ]
+            except Exception as e:
+                print(f"MongoDB get_all_prompts error: {e}")
+                # Fall back to SQLite
+
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -495,6 +581,22 @@ Provide a structured analysis for patent documentation."""
 
     def update_prompt(self, section_key, prompt_text, updated_by):
         """Update a system prompt"""
+        # Use MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                result = self.prompts_collection.update_one(
+                    {"section_key": section_key},
+                    {"$set": {
+                        "prompt_text": prompt_text,
+                        "updated_at": datetime.now().isoformat(),
+                        "updated_by": updated_by
+                    }}
+                )
+                return result.modified_count > 0
+            except Exception as e:
+                print(f"MongoDB update_prompt error: {e}")
+                # Fall back to SQLite
+
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -511,6 +613,25 @@ Provide a structured analysis for patent documentation."""
 
     def add_prompt(self, section_key, section_name, prompt_text, description, updated_by):
         """Add a new system prompt"""
+        # Use MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                # Check if exists
+                if self.prompts_collection.find_one({"section_key": section_key}):
+                    return False  # Already exists
+                self.prompts_collection.insert_one({
+                    "section_key": section_key,
+                    "section_name": section_name,
+                    "prompt_text": prompt_text,
+                    "description": description,
+                    "updated_at": datetime.now().isoformat(),
+                    "updated_by": updated_by
+                })
+                return True
+            except Exception as e:
+                print(f"MongoDB add_prompt error: {e}")
+                # Fall back to SQLite
+
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -534,6 +655,15 @@ Provide a structured analysis for patent documentation."""
 
     def delete_prompt(self, section_key):
         """Delete a system prompt"""
+        # Use MongoDB if available
+        if self.use_mongodb_for_prompts:
+            try:
+                result = self.prompts_collection.delete_one({"section_key": section_key})
+                return result.deleted_count > 0
+            except Exception as e:
+                print(f"MongoDB delete_prompt error: {e}")
+                # Fall back to SQLite
+
         conn = self.get_connection()
         cursor = conn.cursor()
 
