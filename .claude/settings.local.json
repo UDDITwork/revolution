@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from memori import Memori; help(Memori.__init__)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
